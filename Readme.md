@@ -10,7 +10,7 @@ Este projeto tem como objetivo criar um cronômetro utilizando a placa **BitDogL
 
 ## Tecnologias Utilizadas
 - **BitDogLab**
-- Programação em **C/C++** ou **MicroPython** (a definir conforme suporte da placa)
+- Programação em **C/C++**
 - Bibliotecas para controle de botões, display e matriz de LEDs
 
 ## Como Usar
