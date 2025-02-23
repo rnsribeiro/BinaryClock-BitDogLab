@@ -11,10 +11,11 @@
 #define LED_COUNT 25
 #define LED_PIN 7
 
-// Definições de pinos I2C para OLED e botão
+// Definições de pinos I2C para OLED e botões
 const uint I2C_SDA = 14;
 const uint I2C_SCL = 15;
 const uint BUTTON_A = 5; // Pino do botão A (assumido como GP5)
+const uint BUTTON_B = 6; // Pino do botão B (assumido como GP6)
 
 // Estrutura para pixel RGB (formato GRB usado pelos WS2812)
 struct pixel_t {
@@ -133,7 +134,7 @@ void hourToLed(int num) {
 }
 
 /**
- * Função principal: Cronômetro com início/pausa via botão A, LEDs fixos ao pausar, e texto alternado no OLED
+ * Função principal: Cronômetro com início/pausa via botão A, reset via botão B com LEDs apagados, e texto alternado no OLED
  */
 int main() {
     int second = 0, minute = 0, hour = 0; // Contadores de tempo
@@ -141,6 +142,7 @@ int main() {
     uint64_t last_toggle_time = 0; // Último tempo de alternância do texto no OLED
     bool is_running = false; // Estado do cronômetro: false = parado, true = rodando
     bool display_toggle = false; // Controla a alternância do texto no OLED
+    bool is_reset_prompt = false; // Estado para exibir mensagem de reset
 
     stdio_init_all(); // Inicializa comunicação serial via USB
 
@@ -174,33 +176,59 @@ int main() {
     gpio_set_dir(BUTTON_A, GPIO_IN);
     gpio_pull_up(BUTTON_A);
 
+    // Configura o botão B (GP6) como entrada com pull-up
+    gpio_init(BUTTON_B);
+    gpio_set_dir(BUTTON_B, GPIO_IN);
+    gpio_pull_up(BUTTON_B);
+
     while (true) {
-        // Verifica o pressionamento do botão A
-        if (!gpio_get(BUTTON_A)) { // Botão pressionado (nível baixo)
-            is_running = !is_running; // Alterna entre iniciar/pausar
-            sleep_ms(200); // Debounce simples
+        // Verifica os botões
+        if (!gpio_get(BUTTON_A) && !is_reset_prompt) { // Botão A inicia/pausa (fora do reset)
+            is_running = !is_running;
+            sleep_ms(200); // Debounce
+        } else if (!gpio_get(BUTTON_B) && !is_reset_prompt) { // Botão B inicia prompt de reset
+            is_reset_prompt = true;
+            is_running = false;
+            sleep_ms(200); // Debounce
+        } else if (is_reset_prompt) { // Estado de espera por confirmação de reset
+            if (!gpio_get(BUTTON_B)) { // Botão B confirma reset
+                second = 0;
+                minute = 0;
+                hour = 0;
+                npClear(); // Apaga todos os LEDs
+                npWrite(); // Atualiza os LEDs para refletir o estado apagado
+                is_reset_prompt = false;
+                sleep_ms(200); // Debounce
+            } else if (!gpio_get(BUTTON_A)) { // Botão A cancela reset e continua
+                is_reset_prompt = false;
+                is_running = true;
+                sleep_ms(200); // Debounce
+            }
         }
 
         uint64_t current_time = time_us_64() / 1000; // Tempo atual em milissegundos
 
-        if (!is_running) { // Se o cronômetro está parado
-            if (current_time - last_toggle_time >= 1000) { // Alterna texto a cada 500ms
+        if (!is_running && !is_reset_prompt) { // Estado pausado normal
+            if (current_time - last_toggle_time >= 1000) { // Alterna texto a cada 1s
                 display_toggle = !display_toggle;
                 last_toggle_time = current_time;
             }
             memset(ssd, 0, ssd1306_buffer_length); // Limpa o buffer do OLED
             if (display_toggle) {
-                // Exibe o tempo cronometrado
                 char time_str[9];
                 sprintf(time_str, "%02d:%02d:%02d", hour, minute, second);
                 ssd1306_draw_string(ssd, 0, 0, time_str);
             } else {
-                // Exibe mensagem inicial ou "Paused"
                 ssd1306_draw_string(ssd, 0, 0, (second == 0 && minute == 0 && hour == 0) ? "Press A to start" : "Paused");
             }
             render_on_display(ssd, &frame_area); // Atualiza o OLED
-            // LEDs permanecem como estavam (sem npClear ou npWrite)
-        } else { // Se o cronômetro está rodando
+            // LEDs permanecem como estavam
+        } else if (is_reset_prompt) { // Estado de espera por confirmação de reset
+            memset(ssd, 0, ssd1306_buffer_length);
+            ssd1306_draw_string(ssd, 0, 0, "Press B to reset"); // Mensagem de reset
+            render_on_display(ssd, &frame_area);
+            // LEDs permanecem como estavam até confirmação
+        } else { // Estado rodando
             if (current_time - last_time >= 1000) { // Passou 1 segundo?
                 last_time = current_time;
                 second++;
