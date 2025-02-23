@@ -4,30 +4,31 @@
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "hardware/i2c.h"
-#include "ws2818b.pio.h" // Biblioteca PIO para LEDs WS2812
-#include "inc/ssd1306.h" // Biblioteca para display OLED SSD1306
+#include "ws2818b.pio.h"
+#include "inc/ssd1306.h"
 
 // Definições de constantes para LEDs WS2812
-#define LED_COUNT 25 // Número total de LEDs na matriz (5x5)
-#define LED_PIN 7    // Pino GPIO para os LEDs WS2812
+#define LED_COUNT 25
+#define LED_PIN 7
 
-// Definições de pinos I2C para OLED
-const uint I2C_SDA = 14; // Pino SDA para I2C
-const uint I2C_SCL = 15; // Pino SCL para I2C
+// Definições de pinos I2C para OLED e botão
+const uint I2C_SDA = 14;
+const uint I2C_SCL = 15;
+const uint BUTTON_A = 5; // Pino do botão A (assumido como GP5)
 
 // Estrutura para pixel RGB (formato GRB usado pelos WS2812)
 struct pixel_t {
-    uint8_t G, R, B; // Valores de 8 bits para verde (G), vermelho (R) e azul (B)
+    uint8_t G, R, B;
 };
 typedef struct pixel_t pixel_t;
-typedef pixel_t npLED_t; // Renomeação para clareza
+typedef pixel_t npLED_t;
 
 // Buffer global para os 25 LEDs
 npLED_t leds[LED_COUNT];
 
 // Variáveis globais para controle do PIO
-PIO np_pio; // Instância do PIO (pio0 ou pio1)
-uint sm;    // Máquina de estado do PIO
+PIO np_pio;
+uint sm;
 
 /**
  * Define a cor RGB de um LED específico no buffer
@@ -75,7 +76,7 @@ void npWrite() {
         pio_sm_put_blocking(np_pio, sm, leds[i].R);
         pio_sm_put_blocking(np_pio, sm, leds[i].B);
     }
-    sleep_us(100); // Delay de reset conforme datasheet WS2812
+    sleep_us(100);
 }
 
 /**
@@ -86,9 +87,9 @@ void npWrite() {
  */
 int getIndex(int x, int y) {
     if (y % 2 == 0) {
-        return 24 - (y * 5 + x); // Linhas pares: esquerda para direita
+        return 24 - (y * 5 + x);
     } else {
-        return 24 - (y * 5 + (4 - x)); // Linhas ímpares: direita para esquerda
+        return 24 - (y * 5 + (4 - x));
     }
 }
 
@@ -97,10 +98,10 @@ int getIndex(int x, int y) {
  * @param num: Segundos (0 a 59)
  */
 void secToLed(int num) {
-    int positions[] = {0, 9, 10, 19, 20, 1}; // Posições para bits b0 a b5
+    int positions[] = {0, 9, 10, 19, 20, 1};
     for (int i = 0; i < 6; i++) {
         if (num & (1 << i)) {
-            npSetLED(positions[i], 0, 25, 0); // Verde para bit 1
+            npSetLED(positions[i], 0, 25, 0);
         }
     }
 }
@@ -110,10 +111,10 @@ void secToLed(int num) {
  * @param num: Minutos (0 a 59)
  */
 void minToLed(int num) {
-    int positions[] = {2, 7, 12, 17, 22, 3}; // Posições para bits b0 a b5
+    int positions[] = {2, 7, 12, 17, 22, 3};
     for (int i = 0; i < 6; i++) {
         if (num & (1 << i)) {
-            npSetLED(positions[i], 0, 0, 25); // Azul para bit 1
+            npSetLED(positions[i], 0, 0, 25);
         }
     }
 }
@@ -123,29 +124,32 @@ void minToLed(int num) {
  * @param num: Horas (0 a 31)
  */
 void hourToLed(int num) {
-    int positions[] = {4, 5, 14, 15, 24}; // Posições para bits b0 a b4
+    int positions[] = {4, 5, 14, 15, 24};
     for (int i = 0; i < 5; i++) {
         if (num & (1 << i)) {
-            npSetLED(positions[i], 25, 0, 0); // Vermelho para bit 1
+            npSetLED(positions[i], 25, 0, 0);
         }
     }
 }
 
 /**
- * Função principal: Cronômetro com exibição no OLED (HH:MM:SS) e LEDs (binário)
+ * Função principal: Cronômetro com início/pausa via botão A, LEDs fixos ao pausar, e texto alternado no OLED
  */
 int main() {
     int second = 0, minute = 0, hour = 0; // Contadores de tempo
     uint64_t last_time = 0; // Último tempo registrado em milissegundos
+    uint64_t last_toggle_time = 0; // Último tempo de alternância do texto no OLED
+    bool is_running = false; // Estado do cronômetro: false = parado, true = rodando
+    bool display_toggle = false; // Controla a alternância do texto no OLED
 
     stdio_init_all(); // Inicializa comunicação serial via USB
 
     // Inicializa I2C para o OLED
-    i2c_init(i2c1, ssd1306_i2c_clock * 1000); // Configura I2C na velocidade padrão (400kHz)
-    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C); // Define SDA como I2C
-    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C); // Define SCL como I2C
-    gpio_pull_up(I2C_SDA); // Ativa pull-up no SDA
-    gpio_pull_up(I2C_SCL); // Ativa pull-up no SCL
+    i2c_init(i2c1, ssd1306_i2c_clock * 1000);
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA);
+    gpio_pull_up(I2C_SCL);
 
     // Inicializa o display OLED SSD1306
     ssd1306_init();
@@ -153,55 +157,81 @@ int main() {
     // Define a área de renderização do OLED (128x64 pixels, 8 páginas)
     struct render_area frame_area = {
         start_column : 0,
-        end_column : ssd1306_width - 1, // 127
+        end_column : ssd1306_width - 1,
         start_page : 0,
-        end_page : ssd1306_n_pages - 1  // 7
+        end_page : ssd1306_n_pages - 1
     };
-    calculate_render_area_buffer_length(&frame_area); // Calcula tamanho do buffer
+    calculate_render_area_buffer_length(&frame_area);
 
     // Buffer para o OLED
     uint8_t ssd[ssd1306_buffer_length];
-    memset(ssd, 0, ssd1306_buffer_length); // Zera o buffer inicialmente
+    memset(ssd, 0, ssd1306_buffer_length);
 
     npInit(LED_PIN); // Inicializa os LEDs WS2812
 
+    // Configura o botão A (GP5) como entrada com pull-up
+    gpio_init(BUTTON_A);
+    gpio_set_dir(BUTTON_A, GPIO_IN);
+    gpio_pull_up(BUTTON_A);
+
     while (true) {
-        // Contagem de tempo precisa usando time_us_64
+        // Verifica o pressionamento do botão A
+        if (!gpio_get(BUTTON_A)) { // Botão pressionado (nível baixo)
+            is_running = !is_running; // Alterna entre iniciar/pausar
+            sleep_ms(200); // Debounce simples
+        }
+
         uint64_t current_time = time_us_64() / 1000; // Tempo atual em milissegundos
-        if (current_time - last_time >= 1000) { // Passou 1 segundo?
-            last_time = current_time; // Atualiza o último tempo
-            second++; // Incrementa segundos
-            if (second >= 60) { // 60 segundos?
-                second = 0;
-                minute++;
-                if (minute >= 60) { // 60 minutos?
-                    minute = 0;
-                    hour++;
-                    if (hour >= 32) { // 32 horas?
-                        second = 0;
+
+        if (!is_running) { // Se o cronômetro está parado
+            if (current_time - last_toggle_time >= 1000) { // Alterna texto a cada 500ms
+                display_toggle = !display_toggle;
+                last_toggle_time = current_time;
+            }
+            memset(ssd, 0, ssd1306_buffer_length); // Limpa o buffer do OLED
+            if (display_toggle) {
+                // Exibe o tempo cronometrado
+                char time_str[9];
+                sprintf(time_str, "%02d:%02d:%02d", hour, minute, second);
+                ssd1306_draw_string(ssd, 0, 0, time_str);
+            } else {
+                // Exibe mensagem inicial ou "Paused"
+                ssd1306_draw_string(ssd, 0, 0, (second == 0 && minute == 0 && hour == 0) ? "Press A to start" : "Paused");
+            }
+            render_on_display(ssd, &frame_area); // Atualiza o OLED
+            // LEDs permanecem como estavam (sem npClear ou npWrite)
+        } else { // Se o cronômetro está rodando
+            if (current_time - last_time >= 1000) { // Passou 1 segundo?
+                last_time = current_time;
+                second++;
+                if (second >= 60) {
+                    second = 0;
+                    minute++;
+                    if (minute >= 60) {
                         minute = 0;
-                        hour = 0; // Reinicia o cronômetro
+                        hour++;
+                        if (hour >= 32) {
+                            second = 0;
+                            minute = 0;
+                            hour = 0;
+                        }
                     }
                 }
             }
+            // Formata e exibe o tempo no OLED
+            char time_str[9];
+            sprintf(time_str, "%02d:%02d:%02d", hour, minute, second);
+            memset(ssd, 0, ssd1306_buffer_length);
+            ssd1306_draw_string(ssd, 0, 0, time_str);
+            render_on_display(ssd, &frame_area);
+
+            // Atualiza os LEDs WS2812 com valores binários
+            npClear();
+            secToLed(second);
+            minToLed(minute);
+            hourToLed(hour);
+            npWrite();
         }
-
-        // Formata o tempo como HH:MM:SS no OLED
-        char time_str[9]; // Buffer para "HH:MM:SS\0"
-        sprintf(time_str, "%02d:%02d:%02d", hour, minute, second); // Formata com zeros à esquerda
-
-        // Limpa o buffer do OLED e desenha a string
-        memset(ssd, 0, ssd1306_buffer_length); // Zera o buffer
-        ssd1306_draw_string(ssd, 0, 0, time_str); // Escreve na posição (0,0)
-        render_on_display(ssd, &frame_area); // Atualiza o display OLED
-
-        // Atualiza os LEDs WS2812 com valores binários
-        npClear(); // Limpa o buffer dos LEDs
-        secToLed(second); // Segundos em verde
-        minToLed(minute); // Minutos em azul
-        hourToLed(hour);  // Horas em vermelho
-        npWrite(); // Escreve nos LEDs
-
         sleep_ms(10); // Pequeno delay para evitar sobrecarga da CPU
     }
     return 0;
