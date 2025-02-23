@@ -4,6 +4,7 @@
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "hardware/i2c.h"
+#include "hardware/pwm.h" // Adicionado para controle PWM dos buzzers
 #include "ws2818b.pio.h"
 #include "inc/ssd1306.h"
 
@@ -16,6 +17,8 @@ const uint I2C_SDA = 14;
 const uint I2C_SCL = 15;
 const uint BUTTON_A = 5; // Pino do botão A (assumido como GP5)
 const uint BUTTON_B = 6; // Pino do botão B (assumido como GP6)
+const uint BUZZER1_PIN = 21; // Pino do buzzer 1 (assumido GP21)
+const uint BUZZER2_PIN = 10; // Pino do buzzer 2 (assumido GP10)
 
 // Estrutura para pixel RGB (formato GRB usado pelos WS2812)
 struct pixel_t {
@@ -134,7 +137,27 @@ void hourToLed(int num) {
 }
 
 /**
- * Função principal: Cronômetro com início/pausa via botão A, reset via botão B com LEDs apagados, e texto alternado no OLED
+ * Emite um som no buzzer 1 (1000 Hz)
+ * @param duration_ms: Duração do som em milissegundos
+ */
+void buzzer1_beep(uint32_t duration_ms) {
+    pwm_set_gpio_level(BUZZER1_PIN, 125); // Duty cycle ~50%
+    sleep_ms(duration_ms);
+    pwm_set_gpio_level(BUZZER1_PIN, 0); // Desliga o buzzer
+}
+
+/**
+ * Emite um som no buzzer 2 (500 Hz)
+ * @param duration_ms: Duração do som em milissegundos
+ */
+void buzzer2_beep(uint32_t duration_ms) {
+    pwm_set_gpio_level(BUZZER2_PIN, 125); // Duty cycle ~50%
+    sleep_ms(duration_ms);
+    pwm_set_gpio_level(BUZZER2_PIN, 0); // Desliga o buzzer
+}
+
+/**
+ * Função principal: Cronômetro com início/pausa via botão A, reset via botão B com LEDs apagados e sons nos buzzers
  */
 int main() {
     int second = 0, minute = 0, hour = 0; // Contadores de tempo
@@ -181,14 +204,30 @@ int main() {
     gpio_set_dir(BUTTON_B, GPIO_IN);
     gpio_pull_up(BUTTON_B);
 
+    // Configura PWM para buzzer 1 (1000 Hz)
+    gpio_set_function(BUZZER1_PIN, GPIO_FUNC_PWM);
+    uint slice_num1 = pwm_gpio_to_slice_num(BUZZER1_PIN);
+    pwm_set_wrap(slice_num1, 2499); // Frequência base ajustada
+    pwm_set_clkdiv(slice_num1, 50.0f); // Divide para ~1000 Hz (125MHz / (2500 * 50) = 1000 Hz)
+    pwm_set_enabled(slice_num1, true);
+
+    // Configura PWM para buzzer 2 (500 Hz)
+    gpio_set_function(BUZZER2_PIN, GPIO_FUNC_PWM);
+    uint slice_num2 = pwm_gpio_to_slice_num(BUZZER2_PIN);
+    pwm_set_wrap(slice_num2, 4999); // Frequência base ajustada
+    pwm_set_clkdiv(slice_num2, 50.0f); // Divide para ~500 Hz (125MHz / (5000 * 50) = 500 Hz)
+    pwm_set_enabled(slice_num2, true);
+
     while (true) {
         // Verifica os botões
-        if (!gpio_get(BUTTON_A) && !is_reset_prompt) { // Botão A inicia/pausa (fora do reset)
+        if (!gpio_get(BUTTON_A) && !is_reset_prompt) { // Botão A inicia/pausa
             is_running = !is_running;
+            buzzer1_beep(100); // Som de 1000 Hz por 100 ms
             sleep_ms(200); // Debounce
         } else if (!gpio_get(BUTTON_B) && !is_reset_prompt) { // Botão B inicia prompt de reset
             is_reset_prompt = true;
             is_running = false;
+            buzzer2_beep(100); // Som de 500 Hz por 100 ms
             sleep_ms(200); // Debounce
         } else if (is_reset_prompt) { // Estado de espera por confirmação de reset
             if (!gpio_get(BUTTON_B)) { // Botão B confirma reset
@@ -197,11 +236,13 @@ int main() {
                 hour = 0;
                 npClear(); // Apaga todos os LEDs
                 npWrite(); // Atualiza os LEDs para refletir o estado apagado
+                buzzer2_beep(100); // Som de 500 Hz por 100 ms
                 is_reset_prompt = false;
                 sleep_ms(200); // Debounce
             } else if (!gpio_get(BUTTON_A)) { // Botão A cancela reset e continua
                 is_reset_prompt = false;
                 is_running = true;
+                buzzer1_beep(100); // Som de 1000 Hz por 100 ms
                 sleep_ms(200); // Debounce
             }
         }

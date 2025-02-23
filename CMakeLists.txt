@@ -53,6 +53,7 @@ target_link_libraries(chronometer_project
     hardware_pio
     hardware_clocks
     hardware_i2c
+    hardware_pwm
 )
 
 # Define diretórios de inclusão
