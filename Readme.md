@@ -4,6 +4,9 @@
 Rodrigo Nunes Sampaio Ribeiro  
 Contato: rnsribeiro@gmail.com
 
+## Video de Demonstração
+[![Demonstração BitDogLab](https://img.youtube.com/vi/kfQC4YPR4o0/0.jpg)](https://www.youtube.com/watch?v=kfQC4YPR4o0)
+
 ## Descrição
 Este projeto cria um cronômetro interativo utilizando a placa **BitDogLab** baseada no Raspberry Pi Pico W RP2040. O cronômetro é controlado por dois botões físicos (A e B), exibe o tempo decorrido no formato "HH:MM:SS" em um display OLED SSD1306, e representa os valores de segundos, minutos e horas em sistema binário usando uma matriz de LEDs WS2812 5x5. Além disso, inclui feedback sonoro por meio de dois buzzers, emitindo tons distintos para cada botão pressionado.
 
